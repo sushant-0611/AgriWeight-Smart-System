@@ -12,6 +12,13 @@ export function notFound(message) {
   return err
 }
 
+export function unprocessable(message) {
+  const err = new Error(message)
+  err.status = 422
+  err.publicMessage = message
+  return err
+}
+
 export const asyncHandler = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next)
 

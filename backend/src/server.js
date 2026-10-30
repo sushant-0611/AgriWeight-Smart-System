@@ -6,6 +6,7 @@ import devicesRouter from './routes/devices.js'
 import weighingsRouter from './routes/weighings.js'
 import farmersRouter from './routes/farmers.js'
 import { errorHandler, notFound } from './middleware/errorHandler.js'
+import { ensureRegisteredFarmers } from './utils/farmers.js'
 
 const app = express()
 
@@ -28,6 +29,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 await connectDb(config.mongoUri)
+await ensureRegisteredFarmers()
 
 app.listen(config.port, () => {
   console.log(`AgriWeight backend running at http://localhost:${config.port}`)

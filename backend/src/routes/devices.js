@@ -11,6 +11,7 @@ import {
   normalizeMode,
 } from '../utils/http.js'
 import { farmerSummaryById, serializeRecord } from '../utils/serializers.js'
+import { isRegisteredFarmerId } from '../utils/farmers.js'
 
 const router = Router()
 
@@ -31,9 +32,12 @@ router.post(
       throw badRequest('net_weight_kg must be a number')
     }
 
-    const farmerId = farmer_id ? normalizeFarmerId(farmer_id) : null
-    if (farmerId && farmerId.length > 32) {
-      throw badRequest('farmer_id must be at most 32 characters')
+    let farmerId = farmer_id ? normalizeFarmerId(farmer_id) : null
+    if (farmerId && !isRegisteredFarmerId(farmerId)) {
+      // Never store an unregistered farmer ID in telemetry. Ignoring it keeps
+      // the heartbeat (and online status) alive while guaranteeing that only
+      // registered farmers ever appear in the system.
+      farmerId = null
     }
 
     const price =

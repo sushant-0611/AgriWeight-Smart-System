@@ -1,3 +1,8 @@
+// Forward declarations: the Arduino builder inserts function prototypes
+// above the first function in the sketch, so these types must be known
+// before that point.
+struct Button;
+struct SaveJob;
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -29,6 +34,26 @@ const char* DEVICE_ID = "AGRIWEIGHT-01";
 // Must match DEVICE_API_KEY in the backend .env file.
 const char* DEVICE_API_KEY =
   "agw_a3bc9a1bf38b7db3f6d4ffee04b2c90d2b6041ca0feb4dd8";
+
+// ---------- REGISTERED FARMER IDS ----------
+// Only these fixed 4-digit IDs are accepted from the keypad.
+// Keep this list identical to REGISTERED_FARMER_IDS in the backend .env.
+const char* REGISTERED_FARMER_IDS[] = {
+  "1001", "1002", "1003", "1004", "1005",
+  "1006", "1007", "1008", "1009", "1010"
+};
+const uint8_t REGISTERED_FARMER_COUNT =
+  sizeof(REGISTERED_FARMER_IDS) / sizeof(REGISTERED_FARMER_IDS[0]);
+
+bool isRegisteredFarmerId(const String &id) {
+  if (id.length() != 4) return false;
+
+  for (uint8_t i = 0; i < REGISTERED_FARMER_COUNT; i++) {
+    if (id == REGISTERED_FARMER_IDS[i]) return true;
+  }
+
+  return false;
+}
 
 // ---------- HX711 ----------
 #define HX711_DOUT 25
@@ -360,6 +385,17 @@ void handleKeypad() {
     }
 
     if (selectedField == 0) {
+      // Only the fixed registered 4-digit IDs may be accepted.
+      // A rejected ID is not stored, so the operator cannot weigh
+      // against an arbitrary farmer number.
+      if (!isRegisteredFarmerId(keypadInput)) {
+        statusText = "ID NOT REGISTERED";
+        keypadInput = "";
+        startBeep(200);
+        startBlinkRed(400);
+        return;
+      }
+
       farmerId = keypadInput;
       farmerEntered = true;
       selectedField = 1;
@@ -465,6 +501,7 @@ int8_t postWeighing(const SaveJob &job) {
   if (code >= 200 && code < 300) return 1;
   if (code == 401) return -2;
   if (code == 400) return -3;
+  if (code == 422) return -4;  // unregistered farmer ID rejected
   return -1;
 }
 
@@ -767,6 +804,11 @@ void loop() {
       statusText = "AUTH ERROR - CHECK KEY";
     } else if (result == -3) {
       statusText = "SERVER REJECTED DATA";
+    } else if (result == -4) {
+      // The server refused an unregistered farmer ID: nothing saved.
+      statusText = "ID NOT REGISTERED";
+      startBeep(200);
+      startBlinkRed(400);
     } else {
       statusText = "SAVE FAILED - RETRIES ON";
     }

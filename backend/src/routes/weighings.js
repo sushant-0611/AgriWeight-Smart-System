@@ -12,6 +12,7 @@ import {
   parsePageQuery,
 } from '../utils/http.js'
 import { serializeRecord } from '../utils/serializers.js'
+import { assertRegisteredFarmerId } from '../utils/farmers.js'
 
 const router = Router()
 
@@ -24,9 +25,13 @@ router.post(
       req.body || {}
 
     const farmerId = normalizeFarmerId(farmer_id)
-    if (!farmerId || farmerId.length > 32) {
-      throw badRequest('A valid farmer_id is required (max 32 characters)')
+    if (!farmerId) {
+      throw badRequest('A farmer_id is required')
     }
+    // Only the fixed registered farmer IDs are accepted. This throws a 422
+    // for any ID that is not on the client-approved list, so nothing is
+    // stored for an unregistered farmer.
+    assertRegisteredFarmerId(farmerId)
 
     const weight = Number(weight_kg)
     if (!Number.isFinite(weight) || weight <= 0 || weight > 100000) {
@@ -62,19 +67,11 @@ router.post(
       }
     }
 
-    // Atomic upsert — concurrent requests never create duplicate farmers.
-    let farmer
-    try {
-      farmer = await Farmer.findOneAndUpdate(
-        { farmer_id: farmerId },
-        { $setOnInsert: { farmer_id: farmerId } },
-        { upsert: true, new: true }
-      )
-    } catch (err) {
-      if (err && err.code === 11000) {
-        farmer = await Farmer.findOne({ farmer_id: farmerId })
-      }
-      if (!farmer) throw err
+    // The ID is a registered farmer; fetch the seeded farmer document.
+    // It is created only if missing (still a registered ID, never arbitrary).
+    let farmer = await Farmer.findOne({ farmer_id: farmerId })
+    if (!farmer) {
+      farmer = await Farmer.create({ farmer_id: farmerId })
     }
 
     const weightKg = round3(weight)
