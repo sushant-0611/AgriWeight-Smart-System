@@ -1,5 +1,4 @@
 import { Router } from 'express'
-import Farmer from '../models/Farmer.js'
 import WeighingRecord from '../models/WeighingRecord.js'
 import { deviceAuth } from '../middleware/deviceAuth.js'
 import { config } from '../config.js'
@@ -10,9 +9,10 @@ import {
   normalizeFarmerId,
   normalizeMode,
   parsePageQuery,
+  unprocessable,
 } from '../utils/http.js'
 import { serializeRecord } from '../utils/serializers.js'
-import { assertRegisteredFarmerId } from '../utils/farmers.js'
+import { findFarmer } from '../utils/farmers.js'
 
 const router = Router()
 
@@ -28,10 +28,13 @@ router.post(
     if (!farmerId) {
       throw badRequest('A farmer_id is required')
     }
-    // Only the fixed registered farmer IDs are accepted. This throws a 422
-    // for any ID that is not on the client-approved list, so nothing is
-    // stored for an unregistered farmer.
-    assertRegisteredFarmerId(farmerId)
+
+    // The Farmer ID must exist in the database. Unregistered IDs are rejected
+    // before anything is stored so hardware cannot create phantom farmers.
+    const farmer = await findFarmer(farmerId)
+    if (!farmer) {
+      throw unprocessable('Invalid Farmer ID. Farmer is not registered.')
+    }
 
     const weight = Number(weight_kg)
     if (!Number.isFinite(weight) || weight <= 0 || weight > 100000) {
@@ -65,13 +68,6 @@ router.post(
           data: { record: serializeRecord(existing), duplicate: true },
         })
       }
-    }
-
-    // The ID is a registered farmer; fetch the seeded farmer document.
-    // It is created only if missing (still a registered ID, never arbitrary).
-    let farmer = await Farmer.findOne({ farmer_id: farmerId })
-    if (!farmer) {
-      farmer = await Farmer.create({ farmer_id: farmerId })
     }
 
     const weightKg = round3(weight)

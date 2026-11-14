@@ -12,10 +12,25 @@ export function notFound(message) {
   return err
 }
 
+export function conflict(message) {
+  const err = new Error(message)
+  err.status = 409
+  err.publicMessage = message
+  return err
+}
+
 export function unprocessable(message) {
   const err = new Error(message)
   err.status = 422
   err.publicMessage = message
+  return err
+}
+
+export function validationError(message, details) {
+  const err = new Error(message)
+  err.status = 400
+  err.publicMessage = message
+  err.details = details
   return err
 }
 

@@ -1,19 +1,47 @@
-import { useEffect, useState } from 'react'
-import { DEVICE_ID, fetchDeviceStatus } from '../api/client.js'
+import { useCallback, useEffect, useState } from 'react'
+import { DEVICE_ID, fetchDashboardStats, fetchDeviceStatus } from '../api/client.js'
 import {
   formatWeight,
   formatINR,
+  formatDate,
   formatDateTime,
   timeAgo,
 } from '../utils/format.js'
+import EmptyState from './EmptyState.jsx'
+import Icon from './Icons.jsx'
+import LoadingBlock from './LoadingBlock.jsx'
+import StatusBadge from './StatusBadge.jsx'
 
 const POLL_INTERVAL_MS = 2000
+const STATS_INTERVAL_MS = 15000
 
-export default function Dashboard({ onStatusChange }) {
+function StatCard({ icon, label, value, hint, loading }) {
+  return (
+    <div className="aw-stat-card">
+      <span className="aw-stat-icon" aria-hidden="true">
+        <Icon name={icon} size={20} />
+      </span>
+      <div className="aw-stat-body">
+        <div className="aw-stat-label">{label}</div>
+        {loading ? (
+          <div className="aw-stat-skeleton" aria-hidden="true" />
+        ) : (
+          <div className="aw-stat-value">{Number(value || 0).toLocaleString('en-IN')}</div>
+        )}
+        <div className="aw-stat-hint">{hint}</div>
+      </div>
+    </div>
+  )
+}
+
+export default function Dashboard({ onStatusChange, onNavigate }) {
   const [status, setStatus] = useState(null)
   const [serverReachable, setServerReachable] = useState(true)
   const [loading, setLoading] = useState(true)
   const [lastSync, setLastSync] = useState(null)
+  const [stats, setStats] = useState(null)
+  const [statsLoading, setStatsLoading] = useState(true)
+  const [statsError, setStatsError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -44,11 +72,32 @@ export default function Dashboard({ onStatusChange }) {
     }
   }, [onStatusChange])
 
+  const loadStats = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setStatsLoading(true)
+    try {
+      const data = await fetchDashboardStats()
+      setStats(data)
+      setStatsError(null)
+    } catch (err) {
+      setStatsError(err.message)
+    } finally {
+      setStatsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadStats()
+    const timer = setInterval(() => loadStats({ silent: true }), STATS_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [loadStats])
+
   if (loading) {
     return (
-      <div className="d-flex justify-content-center align-items-center py-5">
-        <div className="spinner-border text-success" role="status">
-          <span className="visually-hidden">Loading dashboard...</span>
+      <div className="container py-3 py-md-4">
+        <div className="d-flex justify-content-center align-items-center py-5">
+          <div className="spinner-border text-success" role="status">
+            <span className="visually-hidden">Loading dashboard...</span>
+          </div>
         </div>
       </div>
     )
@@ -58,13 +107,17 @@ export default function Dashboard({ onStatusChange }) {
   const telemetry = status?.telemetry || null
   const summary = status?.farmerSummary || null
   const lastRecord = status?.lastRecord || null
+  const farmerProfile = status?.farmerProfile || null
+  const currentFarmerId = telemetry?.farmerId || status?.assignedFarmerId || null
 
   const mode = telemetry?.mode || null
-  const hasWeight = online && telemetry?.netWeightKg !== null && telemetry?.netWeightKg !== undefined
+  const hasWeight =
+    online && telemetry?.netWeightKg !== null && telemetry?.netWeightKg !== undefined
   const estimate =
     hasWeight && telemetry?.pricePerKg !== null && telemetry?.pricePerKg !== undefined
       ? Math.round(Number(telemetry.netWeightKg) * Number(telemetry.pricePerKg) * 100) / 100
       : null
+  const recentRegistrations = stats?.recentRegistrations || []
 
   return (
     <div className="container py-3 py-md-4">
@@ -76,6 +129,59 @@ export default function Dashboard({ onStatusChange }) {
       )}
 
       <div className="row g-3">
+        <div className="col-6 col-xl-3">
+          <StatCard
+            icon="users"
+            label="Total Farmers"
+            value={stats?.totalFarmers}
+            hint={`${Number(stats?.activeFarmers || 0).toLocaleString('en-IN')} active`}
+            loading={statsLoading && !stats}
+          />
+        </div>
+        <div className="col-6 col-xl-3">
+          <StatCard
+            icon="device"
+            label="Registered Devices"
+            value={stats?.registeredDevices}
+            hint={`${Number(stats?.assignedDevices || 0).toLocaleString('en-IN')} assigned`}
+            loading={statsLoading && !stats}
+          />
+        </div>
+        <div className="col-6 col-xl-3">
+          <StatCard
+            icon="activity"
+            label="Active Devices"
+            value={stats?.activeDevices}
+            hint="Reporting telemetry now"
+            loading={statsLoading && !stats}
+          />
+        </div>
+        <div className="col-6 col-xl-3">
+          <StatCard
+            icon="link"
+            label="Assigned Devices"
+            value={stats?.assignedDevices}
+            hint="Linked to a farmer"
+            loading={statsLoading && !stats}
+          />
+        </div>
+      </div>
+
+      {statsError && !stats && (
+        <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2 mt-3" role="alert">
+          <strong>Statistics unavailable.</strong>
+          <span>{statsError}</span>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary ms-auto"
+            onClick={() => loadStats()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      <div className="row g-3 mt-0">
         <div className="col-lg-7">
           <section className="aw-panel h-100">
             <div className="d-flex justify-content-between align-items-center mb-3">
@@ -114,8 +220,14 @@ export default function Dashboard({ onStatusChange }) {
               <div className="col-sm-6">
                 <div className="aw-mini-label">Current Farmer ID</div>
                 <div className="aw-mini-value">
-                  {telemetry?.farmerId ? telemetry.farmerId : <span className="text-muted">—</span>}
+                  {currentFarmerId ? currentFarmerId : <span className="text-muted">—</span>}
                 </div>
+                {farmerProfile && (
+                  <div className="aw-note">
+                    {farmerProfile.fullName || 'Profile incomplete'}
+                    {farmerProfile.village ? ` · ${farmerProfile.village}` : ''}
+                  </div>
+                )}
               </div>
               <div className="col-sm-6">
                 <div className="aw-mini-label">Current Price / kg</div>
@@ -146,6 +258,10 @@ export default function Dashboard({ onStatusChange }) {
                     {online ? 'Online' : 'Offline'}
                   </span>
                 </dd>
+              </div>
+              <div className="aw-status-row">
+                <dt>Assigned Farmer</dt>
+                <dd>{status?.assignedFarmerId || 'Not assigned'}</dd>
               </div>
               <div className="aw-status-row">
                 <dt>Last Communication</dt>
@@ -203,7 +319,7 @@ export default function Dashboard({ onStatusChange }) {
             <h2 className="aw-section-title mb-1">Farmer Saved Totals</h2>
             <p className="aw-note mb-3">
               {summary
-                ? `Cumulative totals from saved records for ${summary.farmerId}.`
+                ? `Cumulative totals from saved records for ${farmerProfile?.fullName || summary.farmerId}.`
                 : 'Cumulative totals from saved records in the database.'}
             </p>
             {summary ? (
@@ -232,18 +348,71 @@ export default function Dashboard({ onStatusChange }) {
       </div>
 
       <div className="row g-3 mt-0">
-        <div className="col-12">
-          <section className="aw-panel">
+        <div className="col-lg-7">
+          <section className="aw-panel h-100">
+            <div className="d-flex align-items-start justify-content-between gap-2 mb-2">
+              <div>
+                <h2 className="aw-section-title mb-1">Recent Registrations</h2>
+                <p className="aw-note mb-0">Newest farmers added to the database.</p>
+              </div>
+              {onNavigate && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-success"
+                  onClick={() => onNavigate('farmers')}
+                >
+                  View All Farmers
+                </button>
+              )}
+            </div>
+
+            {statsLoading && !stats ? (
+              <LoadingBlock label="Loading registrations..." compact />
+            ) : recentRegistrations.length === 0 ? (
+              <EmptyState
+                title="No farmers registered"
+                message="Register the first farmer from the Farmers tab."
+              />
+            ) : (
+              <ul className="aw-recent-list">
+                {recentRegistrations.map((farmer) => (
+                  <li key={farmer.farmerId}>
+                    <div className="aw-recent-main">
+                      <span className="aw-id-chip">{farmer.farmerId}</span>
+                      <div>
+                        <div className="fw-semibold">
+                          {farmer.fullName || 'Unnamed farmer'}
+                        </div>
+                        <div className="aw-note">
+                          {farmer.village || 'Village not provided'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="aw-recent-meta">
+                      <span className="small text-muted">{formatDate(farmer.createdAt)}</span>
+                      <StatusBadge status={farmer.status} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div className="col-lg-5">
+          <section className="aw-panel h-100">
             <h2 className="aw-section-title mb-3">Last Successful Weighing</h2>
             {lastRecord ? (
-              <div className="d-flex flex-wrap align-items-center gap-2 gap-md-3 aw-last-record">
-                <span className="fw-semibold">{lastRecord.farmerId}</span>
-                <span>{formatWeight(lastRecord.weightKg)}</span>
-                <span>{formatINR(lastRecord.pricePerKg)} / kg</span>
-                <span className="text-success fw-semibold">{formatINR(lastRecord.totalAmount)}</span>
-                <span className="text-muted small ms-md-auto">
-                  {formatDateTime(lastRecord.createdAt)}
-                </span>
+              <div className="aw-last-record d-flex flex-column gap-2">
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <span className="fw-semibold">{lastRecord.farmerId}</span>
+                  <span>{formatWeight(lastRecord.weightKg)}</span>
+                  <span>{formatINR(lastRecord.pricePerKg)} / kg</span>
+                  <span className="text-success fw-semibold">
+                    {formatINR(lastRecord.totalAmount)}
+                  </span>
+                </div>
+                <div className="text-muted small">{formatDateTime(lastRecord.createdAt)}</div>
               </div>
             ) : (
               <p className="text-muted small mb-0">

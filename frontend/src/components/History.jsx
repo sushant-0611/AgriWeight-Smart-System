@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { fetchFarmers } from '../api/client.js'
 import { formatWeight, formatINR } from '../utils/format.js'
-import FarmerDetail from './FarmerDetail.jsx'
 import EmptyState from './EmptyState.jsx'
+import FarmerDetail from './FarmerDetail.jsx'
+import LoadingBlock from './LoadingBlock.jsx'
 
 export default function History() {
   const [farmers, setFarmers] = useState([])
@@ -35,27 +36,32 @@ export default function History() {
 
   if (selectedFarmerId) {
     return (
-      <FarmerDetail
-        farmerId={selectedFarmerId}
-        onBack={() => setSelectedFarmerId(null)}
-      />
+      <div className="container py-3 py-md-4">
+        <FarmerDetail
+          farmerId={selectedFarmerId}
+          onBack={() => setSelectedFarmerId(null)}
+        />
+      </div>
     )
   }
 
   return (
     <div className="container py-3 py-md-4">
-      <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-        <h1 className="aw-page-title mb-0">Farmer History</h1>
+      <div className="aw-page-head">
+        <div>
+          <h1 className="aw-page-title mb-1">Farmer History</h1>
+          <p className="aw-page-subtitle mb-0">
+            Saved weighing totals for every registered farmer.
+          </p>
+        </div>
         <span className="text-muted small">
           {farmers.length} farmer{farmers.length === 1 ? '' : 's'}
         </span>
       </div>
 
       {loading ? (
-        <div className="d-flex justify-content-center py-5">
-          <div className="spinner-border text-success" role="status">
-            <span className="visually-hidden">Loading farmers...</span>
-          </div>
+        <div className="aw-panel">
+          <LoadingBlock label="Loading farmer history..." />
         </div>
       ) : error ? (
         <div className="alert alert-danger" role="alert">
@@ -65,7 +71,7 @@ export default function History() {
         <div className="aw-panel">
           <EmptyState
             title="No farmers yet"
-            message="Farmers appear here automatically when the hardware saves a weighing record with a Farmer ID."
+            message="Register farmers in the Farmers tab. Weighing records appear here after the hardware saves a weighing."
           />
         </div>
       ) : (
@@ -75,16 +81,32 @@ export default function History() {
               <thead>
                 <tr>
                   <th scope="col">Farmer ID</th>
-                  <th scope="col" className="text-end">Crates</th>
-                  <th scope="col" className="text-end">Total Weight</th>
-                  <th scope="col" className="text-end">Total Amount</th>
-                  <th scope="col" className="text-end">Action</th>
+                  <th scope="col">Farmer Name</th>
+                  <th scope="col">Village</th>
+                  <th scope="col" className="text-end">
+                    Crates
+                  </th>
+                  <th scope="col" className="text-end">
+                    Total Weight
+                  </th>
+                  <th scope="col" className="text-end">
+                    Total Amount
+                  </th>
+                  <th scope="col" className="text-end">
+                    Action
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {farmers.map((farmer) => (
                   <tr key={farmer.farmerId}>
-                    <td className="fw-semibold">{farmer.farmerId}</td>
+                    <td>
+                      <span className="aw-id-chip">{farmer.farmerId}</span>
+                    </td>
+                    <td className="fw-semibold">
+                      {farmer.fullName || <span className="aw-muted">Not provided</span>}
+                    </td>
+                    <td>{farmer.village || <span className="aw-muted">—</span>}</td>
                     <td className="text-end">{farmer.recordCount}</td>
                     <td className="text-end">{formatWeight(farmer.totalWeightKg)}</td>
                     <td className="text-end fw-semibold">{formatINR(farmer.totalAmount)}</td>

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import Device from '../models/Device.js'
+import Farmer from '../models/Farmer.js'
 import WeighingRecord from '../models/WeighingRecord.js'
 import { deviceAuth } from '../middleware/deviceAuth.js'
 import { config } from '../config.js'
@@ -7,13 +8,45 @@ import { round2, round3 } from '../utils/money.js'
 import {
   asyncHandler,
   badRequest,
+  conflict,
   normalizeFarmerId,
   normalizeMode,
+  notFound,
 } from '../utils/http.js'
-import { farmerSummaryById, serializeRecord } from '../utils/serializers.js'
-import { isRegisteredFarmerId } from '../utils/farmers.js'
+import {
+  farmerSummaryById,
+  serializeDevice,
+  serializeFarmer,
+  serializeRecord,
+} from '../utils/serializers.js'
+import { farmerExists } from '../utils/farmers.js'
 
 const router = Router()
+
+const INVALID_FARMER_MESSAGE = 'Invalid Farmer ID. Farmer is not registered.'
+
+async function farmersForDevices(devices) {
+  const ids = [...new Set(devices.map((d) => d.assigned_farmer_id).filter(Boolean))]
+  if (!ids.length) return new Map()
+  const farmers = await Farmer.find({ farmer_id: { $in: ids } }).lean()
+  return new Map(farmers.map((farmer) => [farmer.farmer_id, farmer]))
+}
+
+// GET /api/devices — devices known to the system with assignment state.
+router.get(
+  '/',
+  asyncHandler(async (_req, res) => {
+    const devices = await Device.find({}).sort({ created_at: -1, _id: -1 }).lean()
+    const farmerMap = await farmersForDevices(devices)
+    const now = new Date()
+    res.json({
+      success: true,
+      data: devices.map((device) =>
+        serializeDevice(device, { farmer: farmerMap.get(device.assigned_farmer_id), now })
+      ),
+    })
+  })
+)
 
 // POST /api/devices/telemetry — ESP32 heartbeat with current state.
 router.post(
@@ -33,10 +66,9 @@ router.post(
     }
 
     let farmerId = farmer_id ? normalizeFarmerId(farmer_id) : null
-    if (farmerId && !isRegisteredFarmerId(farmerId)) {
-      // Never store an unregistered farmer ID in telemetry. Ignoring it keeps
-      // the heartbeat (and online status) alive while guaranteeing that only
-      // registered farmers ever appear in the system.
+    if (farmerId && !(await farmerExists(farmerId))) {
+      // Keep the heartbeat (and online status) alive, but never attach an
+      // unregistered farmer ID to telemetry.
       farmerId = null
     }
 
@@ -73,6 +105,76 @@ router.post(
   })
 )
 
+// POST /api/devices/:deviceId/assign — link a device to a registered farmer.
+// Upserts the device so a device can be assigned before its first heartbeat.
+router.post(
+  '/:deviceId/assign',
+  asyncHandler(async (req, res) => {
+    const deviceId = String(req.params.deviceId || '').trim()
+    if (!deviceId) throw badRequest('Device ID is required.')
+
+    const farmerId = normalizeFarmerId(req.body?.farmerId ?? req.body?.farmer_id)
+    if (!farmerId) throw badRequest('Farmer ID is required for assignment.')
+
+    const farmer = await Farmer.findOne({ farmer_id: farmerId }).lean()
+    if (!farmer) throw notFound(INVALID_FARMER_MESSAGE)
+
+    const otherDevice = await Device.findOne({
+      assigned_farmer_id: farmerId,
+      device_id: { $ne: deviceId },
+    })
+      .select('device_id')
+      .lean()
+    if (otherDevice) {
+      throw conflict(
+        `Farmer ${farmerId} is already assigned to device ${otherDevice.device_id}. Unassign it first.`
+      )
+    }
+
+    const now = new Date()
+    const device = await Device.findOneAndUpdate(
+      { device_id: deviceId },
+      {
+        $set: { assigned_farmer_id: farmerId, assigned_at: now },
+        $setOnInsert: { device_id: deviceId },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    )
+
+    res.json({
+      success: true,
+      data: {
+        message: `Device ${deviceId} assigned to farmer ${farmerId}.`,
+        device: serializeDevice(device, { farmer }),
+      },
+    })
+  })
+)
+
+// DELETE /api/devices/:deviceId/assign — remove the farmer mapping.
+router.delete(
+  '/:deviceId/assign',
+  asyncHandler(async (req, res) => {
+    const deviceId = String(req.params.deviceId || '').trim()
+    if (!deviceId) throw badRequest('Device ID is required.')
+
+    const device = await Device.findOneAndUpdate(
+      { device_id: deviceId },
+      { $set: { assigned_farmer_id: null, assigned_at: null } },
+      { new: true }
+    )
+    if (!device) throw notFound(`Device ${deviceId} not found`)
+
+    res.json({
+      success: true,
+      data: {
+        message: `Device ${deviceId} unassigned.`,
+        device: serializeDevice(device),
+      },
+    })
+  })
+)
+
 // GET /api/devices/:deviceId/status — dashboard poll endpoint.
 router.get(
   '/:deviceId/status',
@@ -103,16 +205,14 @@ router.get(
       }
     }
 
-    let farmerSummary = null
-    if (telemetry && telemetry.farmerId) {
-      farmerSummary = await farmerSummaryById(telemetry.farmerId)
-    }
-
-    const lastRecordDoc = await WeighingRecord.findOne({
-      device_id: deviceId,
-    })
-      .sort({ created_at: -1, _id: -1 })
-      .lean()
+    const profileFarmerId = telemetry?.farmerId || device?.assigned_farmer_id || null
+    const [profileFarmer, farmerSummary, lastRecordDoc] = await Promise.all([
+      profileFarmerId ? Farmer.findOne({ farmer_id: profileFarmerId }).lean() : null,
+      profileFarmerId ? farmerSummaryById(profileFarmerId) : null,
+      WeighingRecord.findOne({ device_id: deviceId })
+        .sort({ created_at: -1, _id: -1 })
+        .lean(),
+    ])
 
     res.json({
       success: true,
@@ -122,6 +222,9 @@ router.get(
         lastSeenAt,
         serverTime: now.toISOString(),
         telemetry,
+        farmerProfile: profileFarmer ? serializeFarmer(profileFarmer) : null,
+        assignedFarmerId: device?.assigned_farmer_id || null,
+        assignedAt: device?.assigned_at || null,
         farmerSummary,
         lastRecord: lastRecordDoc ? serializeRecord(lastRecordDoc) : null,
       },

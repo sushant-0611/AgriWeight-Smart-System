@@ -13,6 +13,9 @@ export function errorHandler(err, req, res, _next) {
   }
   res.status(status).json({
     success: false,
-    error: { message: err.publicMessage || 'Internal server error' },
+    error: {
+      message: err.publicMessage || 'Internal server error',
+      ...(err.details && Object.keys(err.details).length ? { details: err.details } : {}),
+    },
   })
 }

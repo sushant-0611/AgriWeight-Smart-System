@@ -35,24 +35,18 @@ const char* DEVICE_ID = "AGRIWEIGHT-01";
 const char* DEVICE_API_KEY =
   "agw_a3bc9a1bf38b7db3f6d4ffee04b2c90d2b6041ca0feb4dd8";
 
-// ---------- REGISTERED FARMER IDS ----------
-// Only these fixed 4-digit IDs are accepted from the keypad.
-// Keep this list identical to REGISTERED_FARMER_IDS in the backend .env.
-const char* REGISTERED_FARMER_IDS[] = {
-  "1001", "1002", "1003", "1004", "1005",
-  "1006", "1007", "1008", "1009", "1010"
-};
-const uint8_t REGISTERED_FARMER_COUNT =
-  sizeof(REGISTERED_FARMER_IDS) / sizeof(REGISTERED_FARMER_IDS[0]);
+// ---------- FARMER ID FORMAT ----------
+// Farmer IDs are registered in the AgriWeight web app and stored in the
+// database. The device accepts any 1-12 digit ID here; the backend is the
+// single source of truth and rejects unregistered IDs with HTTP 422.
+bool isValidFarmerIdFormat(const String &id) {
+  if (id.length() == 0 || id.length() > 12) return false;
 
-bool isRegisteredFarmerId(const String &id) {
-  if (id.length() != 4) return false;
-
-  for (uint8_t i = 0; i < REGISTERED_FARMER_COUNT; i++) {
-    if (id == REGISTERED_FARMER_IDS[i]) return true;
+  for (size_t i = 0; i < id.length(); i++) {
+    if (id[i] < '0' || id[i] > '9') return false;
   }
 
-  return false;
+  return true;
 }
 
 // ---------- HX711 ----------
@@ -385,11 +379,10 @@ void handleKeypad() {
     }
 
     if (selectedField == 0) {
-      // Only the fixed registered 4-digit IDs may be accepted.
-      // A rejected ID is not stored, so the operator cannot weigh
-      // against an arbitrary farmer number.
-      if (!isRegisteredFarmerId(keypadInput)) {
-        statusText = "ID NOT REGISTERED";
+      // Format check only; the backend confirms that this farmer is
+      // registered before saving a weighing record.
+      if (!isValidFarmerIdFormat(keypadInput)) {
+        statusText = "INVALID FARMER ID";
         keypadInput = "";
         startBeep(200);
         startBlinkRed(400);
@@ -806,7 +799,7 @@ void loop() {
       statusText = "SERVER REJECTED DATA";
     } else if (result == -4) {
       // The server refused an unregistered farmer ID: nothing saved.
-      statusText = "ID NOT REGISTERED";
+      statusText = "FARMER NOT REGISTERED";
       startBeep(200);
       startBlinkRed(400);
     } else {

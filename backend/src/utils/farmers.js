@@ -1,45 +1,46 @@
 import Farmer from '../models/Farmer.js'
-import { config } from '../config.js'
-import { unprocessable } from './http.js'
+import { normalizeFarmerId } from './http.js'
 
-// Fixed registry of the farmer IDs the client has approved. Membership is
-// checked instead of trusting any ID that arrives from the hardware.
-const registeredSet = new Set(
-  config.registeredFarmerIds.map((id) => String(id).trim().toUpperCase())
-)
+export { normalizeFarmerId }
 
-export function isRegisteredFarmerId(value) {
-  return registeredSet.has(String(value || '').trim().toUpperCase())
+export async function findFarmer(farmerId) {
+  const id = normalizeFarmerId(farmerId)
+  if (!id) return null
+  return Farmer.findOne({ farmer_id: id }).lean()
 }
 
-export function registeredFarmerIdList() {
-  return [...registeredSet]
+export async function farmerExists(farmerId) {
+  const id = normalizeFarmerId(farmerId)
+  if (!id) return false
+  return Boolean(await Farmer.exists({ farmer_id: id }))
 }
 
-// Normalises and validates a farmer ID, throwing a 422 when it is not one of
-// the fixed registered IDs. Callers must use the returned value.
-export function assertRegisteredFarmerId(value) {
-  const id = String(value || '').trim().toUpperCase()
-  if (!registeredSet.has(id)) {
-    throw unprocessable(
-      `Farmer ID "${id || '(empty)'}" is not registered. Only the registered farmer IDs are accepted.`
-    )
+export async function findFarmerByAadhaar(aadhaarNumber, excludeFarmerId = null) {
+  if (!aadhaarNumber) return null
+  const filter = { aadhaar_number: aadhaarNumber }
+  if (excludeFarmerId) filter.farmer_id = { $ne: excludeFarmerId }
+  return Farmer.findOne(filter).lean()
+}
+
+// Next numeric Farmer ID after the highest existing one. IDs that are not
+// purely numeric are ignored. The unique index remains the final guarantee.
+export async function generateNextFarmerId() {
+  const rows = await Farmer.find({ farmer_id: { $regex: /^[0-9]{1,12}$/ } })
+    .select('farmer_id')
+    .lean()
+
+  let max = 1000
+  for (const row of rows) {
+    const value = Number(row.farmer_id)
+    if (Number.isSafeInteger(value) && value > max) max = value
   }
-  return id
+
+  return String(max + 1)
 }
 
-// Seeds the ten fixed farmers so they appear on the dashboard and can be
-// referenced by records. Safe to run on every startup.
-export async function ensureRegisteredFarmers() {
-  const ids = registeredFarmerIdList()
-  await Promise.all(
-    ids.map((farmer_id) =>
-      Farmer.findOneAndUpdate(
-        { farmer_id },
-        { $setOnInsert: { farmer_id } },
-        { upsert: true, new: true }
-      )
-    )
-  )
-  console.log(`[farmers] registered ${ids.length} fixed farmer IDs: ${ids.join(', ')}`)
+export function isDuplicateKeyError(err, field) {
+  if (!err || err.code !== 11000) return false
+  if (!field) return true
+  const pattern = err.keyPattern || {}
+  return Boolean(pattern[field])
 }

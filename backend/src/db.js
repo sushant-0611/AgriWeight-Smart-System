@@ -1,9 +1,15 @@
+import dns from 'node:dns'
 import mongoose from 'mongoose'
+import { config } from './config.js'
 
 export async function connectDb(uri) {
   if (!uri) {
-    console.error('[db] MONGODB_URI is not set. Copy .env.example to .env and fill it in.')
-    process.exit(1)
+    throw new Error('MONGODB_URI is not set. Copy .env.example to .env and fill it in.')
+  }
+
+  if (config.mongoDnsServers.length) {
+    dns.setServers(config.mongoDnsServers)
+    console.log(`[db] using DNS resolvers: ${config.mongoDnsServers.join(', ')}`)
   }
 
   mongoose.connection.on('connected', () => {
@@ -16,5 +22,5 @@ export async function connectDb(uri) {
     console.warn('[db] MongoDB disconnected')
   })
 
-  await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 })
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 })
 }

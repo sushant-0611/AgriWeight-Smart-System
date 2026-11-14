@@ -10,6 +10,15 @@ const deviceSchema = new mongoose.Schema(
       maxlength: 64,
     },
     last_seen_at: { type: Date, default: null },
+    assigned_farmer_id: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 32,
+      default: null,
+      index: true,
+    },
+    assigned_at: { type: Date, default: null },
     telemetry: {
       net_weight_kg: { type: Number, default: null },
       mode: { type: String, trim: true, maxlength: 10, default: null },

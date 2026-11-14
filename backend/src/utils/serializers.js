@@ -1,4 +1,5 @@
 import WeighingRecord from '../models/WeighingRecord.js'
+import { config } from '../config.js'
 
 export function serializeRecord(doc) {
   return {
@@ -11,6 +12,62 @@ export function serializeRecord(doc) {
     mode: doc.mode,
     crateNumber: doc.crate_number ?? null,
     createdAt: doc.created_at,
+  }
+}
+
+export function maskAadhaar(value) {
+  if (!value) return null
+  const digits = String(value).replace(/\D/g, '')
+  if (digits.length < 4) return null
+  return `XXXX XXXX ${digits.slice(-4)}`
+}
+
+export function serializeFarmer(doc, { includeAadhaar = false } = {}) {
+  return {
+    farmerId: doc.farmer_id,
+    fullName: doc.full_name || null,
+    mobileNumber: doc.mobile_number || null,
+    village: doc.village || null,
+    address: doc.address || null,
+    aadhaarNumber: includeAadhaar
+      ? doc.aadhaar_number || null
+      : maskAadhaar(doc.aadhaar_number),
+    landAreaAcres: doc.land_area_acres ?? null,
+    cropType: doc.crop_type || null,
+    status: doc.status || 'active',
+    createdAt: doc.created_at,
+    updatedAt: doc.updated_at,
+  }
+}
+
+export function isProfileComplete(farmer) {
+  return Boolean(farmer?.fullName && farmer?.mobileNumber && farmer?.village)
+}
+
+export function isDeviceOnline(lastSeenAt, now = new Date()) {
+  if (!lastSeenAt) return false
+  return now.getTime() - new Date(lastSeenAt).getTime() <= config.offlineTimeoutMs
+}
+
+export function serializeDevice(doc, { farmer = null, now = new Date() } = {}) {
+  return {
+    deviceId: doc.device_id,
+    online: isDeviceOnline(doc.last_seen_at, now),
+    lastSeenAt: doc.last_seen_at || null,
+    assignedFarmerId: doc.assigned_farmer_id || null,
+    assignedFarmerName: farmer?.full_name || null,
+    assignedFarmerVillage: farmer?.village || null,
+    assignedAt: doc.assigned_at || null,
+    createdAt: doc.created_at,
+    telemetry: doc.telemetry
+      ? {
+          netWeightKg: doc.telemetry.net_weight_kg ?? null,
+          mode: doc.telemetry.mode ?? null,
+          farmerId: doc.telemetry.farmer_id ?? null,
+          pricePerKg: doc.telemetry.price_per_kg ?? null,
+          updatedAt: doc.telemetry.updated_at ?? null,
+        }
+      : null,
   }
 }
 

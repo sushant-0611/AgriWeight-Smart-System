@@ -1,3 +1,12 @@
+import Icon from './Icons.jsx'
+
+const TABS = [
+  { id: 'dashboard', label: 'Dashboard', icon: 'activity' },
+  { id: 'farmers', label: 'Farmers', icon: 'users' },
+  { id: 'hardware', label: 'Hardware', icon: 'device' },
+  { id: 'history', label: 'History', icon: 'history' },
+]
+
 export default function Navbar({ activeTab, onTabChange, deviceOnline }) {
   return (
     <nav className="navbar aw-navbar sticky-top">
@@ -17,26 +26,21 @@ export default function Navbar({ activeTab, onTabChange, deviceOnline }) {
           </span>
         </span>
 
-        <div className="ms-auto d-flex align-items-center gap-2 gap-sm-3">
+        <div className="ms-auto d-flex align-items-center gap-2 gap-sm-3 aw-nav-actions">
           <div className="aw-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'dashboard'}
-              className={`aw-tab-btn${activeTab === 'dashboard' ? ' active' : ''}`}
-              onClick={() => onTabChange('dashboard')}
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'history'}
-              className={`aw-tab-btn${activeTab === 'history' ? ' active' : ''}`}
-              onClick={() => onTabChange('history')}
-            >
-              History
-            </button>
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                className={`aw-tab-btn${activeTab === tab.id ? ' active' : ''}`}
+                onClick={() => onTabChange(tab.id)}
+              >
+                <Icon name={tab.icon} size={15} className="aw-tab-icon" />
+                {tab.label}
+              </button>
+            ))}
           </div>
           <span
             className={`badge rounded-pill aw-status-pill ${deviceOnline ? 'bg-success' : 'bg-danger'}`}
