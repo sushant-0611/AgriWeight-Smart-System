@@ -6,6 +6,7 @@ import Hardware from './components/Hardware.jsx'
 import History from './components/History.jsx'
 import { ToastProvider } from './components/Toast.jsx'
 
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [deviceOnline, setDeviceOnline] = useState(false)
